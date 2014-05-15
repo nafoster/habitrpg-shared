@@ -8,6 +8,8 @@ api.i18n = i18n
 
 # little helper for large arrays of strings. %w"this that another" equivalent from Rails, I really miss that function
 $w = (s)->s.split(' ')
+api.refMerge = ->
+  _.transform arguments, ((m,coll) -> _.each coll, (v,k)-> m[k]=v), {}
 
 ###
   ------------------------------------------------------
@@ -173,6 +175,7 @@ api.taskDefaults = (task={}) ->
     priority: 1
     challenge: {}
     attribute: 'str'
+    sort: 0
     dateCreated: new Date()
   _.defaults task, defaults
   _.defaults(task, {up:true,down:true}) if task.type is 'habit'
@@ -494,32 +497,38 @@ api.wrap = (user, main=true) ->
         cb? null, user.todos
 
       sortTask: (req, cb) ->
-        {id} = req.params
-        {to, from} = req.query
+        [{id},{to,from}] = [req.params,req.query]
         task = user.tasks[id]
         return cb?({code:404, message: i18n.t('messageTaskNotFound', req.language)}) unless task
         return cb?('?to=__&from=__ are required') unless to? and from?
-        tasks = user["#{task.type}s"]
-        tasks.splice to, 0, tasks.splice(from, 1)[0]
-        cb? null, tasks
+        arr = _(user["#{task.type}s"]).toArray().sortBy('sort').value()
+        console.log {from,to}
+        arr.splice to, 0, arr.splice(from, 1)[0]
+        user["#{task.type}s"] = _.reduce arr,((m,v,k)->v.sort=k;m[v.id]=v;m),{}
+        user.markModified? "#{task.type}s"
+        cb? null, user["#{task.type}s"]
 
       updateTask: (req, cb) ->
         return cb?({code:404,message:i18n.t('messageTaskNotFound', req.language)}) unless task = user.tasks[req.params?.id]
         _.merge task, _.omit(req.body,['checklist','id'])
         task.checklist = req.body.checklist if req.body.checklist
+        user.markModified? "#{task.type}s.#{task.id}"
         task.markModified? 'tags'
         cb? null, task
 
       deleteTask: (req, cb) ->
         task = user.tasks[req.params?.id]
         return cb?({code:404,message:i18n.t('messageTaskNotFound', req.language)}) unless task
-        i = user[task.type + "s"].indexOf(task)
-        user[task.type + "s"].splice(i, 1) if ~i
+        delete user["#{task.type}s"][task.id]
+        user.markModified? "#{task.type}s.#{task.id}"
         cb? null, {}
 
       addTask: (req, cb) ->
         task = api.taskDefaults(req.body)
-        user["#{task.type}s"].unshift(task)
+        tasks = user["#{task.type}s"]
+        _.each tasks, (t)-> t.sort++
+        user["#{task.type}s"][task.id] = task
+        user.markModified? "#{task.type}s"
         if user.preferences.newTaskEdit then task._editing = true
         if user.preferences.tagsCollapsed then task._tags = true
         if user.preferences.advancedCollapsed then task._advanced = true
@@ -764,6 +773,7 @@ api.wrap = (user, main=true) ->
       score: (req, cb) ->
         {id, direction} = req.params # up or down
         task = user.tasks[id]
+        user.markModified? "#{task.type}s.#{task.id}"
         options = req.query or {}; _.defaults(options, {times:1, cron:false})
 
         # This is for setting one-time temporary flags, such as streakBonus or itemDropped. Useful for notifying
@@ -1202,7 +1212,7 @@ api.wrap = (user, main=true) ->
       # Tally each task
       todoTally = 0
       user.party.quest.progress.down ?= 0
-      user.todos.concat(user.dailys).forEach (task) ->
+      _.each api.refMerge(user.todos,user.dailys), (task) ->
         return unless task
 
         {id, type, completed, repeat} = task
@@ -1234,13 +1244,12 @@ api.wrap = (user, main=true) ->
             absVal = if (completed) then Math.abs(task.value) else task.value
             todoTally += absVal
 
-      user.habits.forEach (task) -> # slowly reset 'onlies' value to 0
+      _.each user.habits, (task) -> # slowly reset 'onlies' value to 0
         if task.up is false or task.down is false
           if Math.abs(task.value) < 0.1
             task.value = 0
           else
             task.value = task.value / 2
-
 
       # Finished tallying
       ((user.history ?= {}).todos ?= []).push { date: now, value: todoTally }
@@ -1285,7 +1294,7 @@ api.wrap = (user, main=true) ->
 
     # Registered users with some history
     preenUserHistory: (minHistLen = 7) ->
-      _.each user.habits.concat(user.dailys), (task) ->
+      _.each api.refMerge(user.habits,user.dailys), (task) ->
         task.history = preenHistory(task.history) if task.history?.length > minHistLen
         true
 
@@ -1354,6 +1363,4 @@ api.wrap = (user, main=true) ->
       computed.maxMP = computed.int*2 + 30
       computed
   Object.defineProperty user, 'tasks',
-    get: ->
-      tasks = user.habits.concat(user.dailys).concat(user.todos).concat(user.rewards)
-      _.object(_.pluck(tasks, "id"), tasks)
+    get: -> api.refMerge user.habits, user.dailys, user.todos, user.rewards
