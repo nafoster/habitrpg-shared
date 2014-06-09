@@ -11607,6 +11607,42 @@ _.each(api.food, function(food, key) {
 });
 
 api.quests = {
+  dilatory: {
+    text: t("questDilatoryText"),
+    notes: t("questDilatoryNotes"),
+    value: 0,
+    canBuy: false,
+    boss: {
+      name: t("questDilatoryBoss"),
+      hp: 1200,
+      str: 1,
+      def: 1,
+      rage: {
+        title: t("questDilatoryBossRageTitle"),
+        description: t("questDilatoryBossRageDescription"),
+        value: 1000
+      }
+    },
+    drop: {
+      items: [
+        {
+          type: 'eggs',
+          key: 'Rat',
+          text: t('questRatDropRatEgg')
+        }, {
+          type: 'eggs',
+          key: 'Rat',
+          text: t('questRatDropRatEgg')
+        }, {
+          type: 'eggs',
+          key: 'Rat',
+          text: t('questRatDropRatEgg')
+        }
+      ],
+      gp: 80,
+      exp: 800
+    }
+  },
   evilsanta: {
     canBuy: false,
     text: t('questEvilSantaText'),
@@ -11958,10 +11994,24 @@ api.quests = {
 };
 
 _.each(api.quests, function(v, key) {
-  return _.defaults(v, {
+  var b;
+  _.defaults(v, {
     key: key,
     canBuy: true
   });
+  b = v.boss;
+  if (b) {
+    _.defaults(b, {
+      str: 1,
+      def: 1
+    });
+    if (b.rage) {
+      return _.defaults(b.rage, {
+        title: t('bossRageTitle'),
+        description: t('bossRageDescription')
+      });
+    }
+  }
 });
 
 api.backgrounds = {
